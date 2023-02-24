@@ -171,7 +171,7 @@ const Home: NextPage = (props: any) => {
     }
   }
 
-  const lockAda = async (params: any) => {
+  const lockAda = async (params : any) => {
 
     const benAddr = params[0] as string;
     const adaQty = params[1] as number;
@@ -179,12 +179,12 @@ const Home: NextPage = (props: any) => {
     const deadline = new Date(dueDate + "T00:00");
 
     const benPkh = Address.fromBech32(benAddr).pubKeyHash;
-    const adaAmountVal = new Value(BigInt((adaQty) * 1000000));
+    const adaAmountVal = new Value(BigInt((adaQty)*1000000));
 
     // Get wallet UTXOs
     const walletHelper = new WalletHelper(walletAPI);
     const utxos = await walletHelper.pickUtxos(adaAmountVal);
-
+ 
     // Get change address
     const changeAddr = await walletHelper.changeAddress;
 
@@ -193,7 +193,7 @@ const Home: NextPage = (props: any) => {
 
     // Compile the Helios script 
     const compiledScript = Program.new(script).compile(optimize);
-
+    
     // Extract the validator script address
     const valAddr = Address.fromValidatorHash(compiledScript.validatorHash);
 
@@ -202,18 +202,18 @@ const Home: NextPage = (props: any) => {
 
     // Construct the datum
     const datum = new ListData([new ByteArrayData(ownerPkh.bytes),
-    new ByteArrayData(benPkh.bytes),
-    new IntData(BigInt(deadline.getTime()))]);
+                                  new ByteArrayData(benPkh.bytes),
+                                  new IntData(BigInt(deadline.getTime()))]);
 
     const inlineDatum = Datum.inline(datum);
 
     // Start building the transaction
     const tx = new Tx();
-
+    
     // Add the UTXO as inputs
     tx.addInputs(utxos[0]);
 
-    const mintScript = `minting nft
+    const mintScript =`minting nft
 
     const TX_ID: ByteArray = #` + utxos[0][0].txId.hex + `
     const txId: TxId = TxId::new(TX_ID)
@@ -236,7 +236,7 @@ const Home: NextPage = (props: any) => {
                                         }
         )
     }`
-
+    
     // Compile the helios minting script
     const mintProgram = Program.new(mintScript).compile(optimize);
 
@@ -244,7 +244,7 @@ const Home: NextPage = (props: any) => {
     tx.attachScript(mintProgram);
 
     // Construct the NFT that we will want to send as an output
-    const nftTokenName = ByteArrayData.fromString(nftName).toHex();
+    const nftTokenName = ByteArrayData.fromString("Vesting Key").toHex();
     const tokens: [number[], bigint][] = [[hexToBytes(nftTokenName), BigInt(1)]];
 
     // Create an empty Redeemer because we must always send a Redeemer with
@@ -268,7 +268,7 @@ const Home: NextPage = (props: any) => {
 
     const networkParams = new NetworkParams(
       await fetch(networkParamsUrl)
-        .then(response => response.json())
+          .then(response => response.json())
     )
     console.log("tx before final", tx.dump());
 
@@ -279,14 +279,14 @@ const Home: NextPage = (props: any) => {
     console.log("Verifying signature...");
     const signatures = await walletAPI.signTx(tx);
     tx.addSignatures(signatures);
-
+    
     console.log("Submitting transaction...");
     const txHash = await walletAPI.submitTx(tx);
 
     console.log("txHash", txHash.hex);
     setTx({ txId: txHash.hex });
     setThreadToken({ tt: mintProgram.mintingPolicyHash.hex });
-  }
+  } 
 
   const mintNftInWallet = async () => {
 
@@ -394,18 +394,9 @@ const Home: NextPage = (props: any) => {
       func is_admin(self, tx: Tx) -> Bool { tx.is_signed_by(self.admin) }
   }
   
-  enum Redeemer {
-    Admin
-  }
-  
-  func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
+  func main(datum: Datum, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
-      redeemer.switch {
-          Admin => {
-              // If admin signing can do anything.
-              tx.is_signed_by(datum.admin).trace("Is AdminWallet?: ")
-          }
-      }
+      datum.is_admin(tx).trace("IS_ADMIN: ")
   }` as string
 
   const lockNftDatumScript = `
@@ -531,22 +522,13 @@ const Home: NextPage = (props: any) => {
     const scriptAddress = Address.fromHashes(compiledScript.validatorHash)
     console.log('script address: ' + scriptAddress.toBech32())
 
-    // const valUtxo = await getKeyUtxoV2(scriptAddress.toBech32(), '1a76fe5fcefec3d1184eb1559ddabfd5805d5e1a5fd115ad54e1837a', '4d7920436f6f6c204e4654', benPkh);
+    const valUtxo = await getKeyUtxo(scriptAddress.toBech32(), '255fcaf9aa7d15d76c275c0822db4303d49dd0ecd764f822e78337ba', '4d7920436f6f6c204e4654');
     // tx.addInput(valUtxo, emptyRedeemer);
 
-    const valUtxoV2 = new UTxO(
-      TxId.fromHex('07c73b1a546c79d4747f1d8674974b3f21faa719136fb6a81d9510876c82fa6f'),
-      BigInt(0),
-      new TxOutput(
-        scriptAddress,
-        value,
-        inlineDatum
-      )
-    );
-    tx.addInput(valUtxoV2, emptyRedeemer);
+    tx.addInput(valUtxo, emptyRedeemer);
 
     // Send the value of the of the valUTXO back to the owner
-    tx.addOutput(new TxOutput(changeAddr, valUtxoV2.value));
+    tx.addOutput(new TxOutput(changeAddr, valUtxo.value));
 
     const networkParams = new NetworkParams(
       await fetch(networkParamsUrl)
@@ -619,54 +601,7 @@ const Home: NextPage = (props: any) => {
       new TxOutput(
         Address.fromBech32(scriptAddress),
         value,
-        Datum.inline(ListData.fromCbor(hexToBytes(payload[0].inline_datum)))
-      )
-    );
-  }
-
-  const getKeyUtxoV2 = async (scriptAddress: string, keyMPH: string, keyName: string, pkh: PubKeyHash) => {
-
-    console.log("getKeyUTXO:keyMPH", keyMPH);
-    console.log("getKeyUTXO:keyName", keyName);
-
-    const blockfrostUrl: string = blockfrostAPI + "/addresses/" + scriptAddress + "/utxos/" + keyMPH + keyName;
-    console.log("blockfrost url", blockfrostUrl);
-
-    let resp = await fetch(blockfrostUrl, {
-      method: "GET",
-      headers: {
-        accept: "application/json",
-        project_id: apiKey,
-      },
-    });
-
-    if (resp?.status > 299) {
-      throw console.error("vesting key token not found", resp);
-    }
-    const payload = await resp.json();
-
-    if (payload.length == 0) {
-      throw console.error("vesting key token not found");
-    }
-    const lovelaceAmount = payload[0].amount[0].quantity;
-    const mph = MintingPolicyHash.fromHex(keyMPH);
-    const tokenName = hexToBytes(keyName);
-
-    const value = new Value(BigInt(lovelaceAmount), new Assets([
-      [mph, [
-        [tokenName, BigInt(1)],
-      ]]
-    ]));
-
-    console.log('inline datum: ' + payload[0].inline_datum)
-
-    return new UTxO(
-      TxId.fromHex(payload[0].tx_hash),
-      BigInt(payload[0].output_index),
-      new TxOutput(
-        Address.fromBech32(scriptAddress),
-        value,
-        Datum.inline(new ListData([new ByteArrayData(pkh.bytes)]))
+        Datum.inline(ByteArrayData.fromCbor(hexToBytes(payload[0].inline_datum)))
       )
     );
   }
