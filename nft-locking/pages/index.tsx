@@ -72,6 +72,9 @@ const Home: NextPage = (props: any) => {
   // export NEXT_PUBLIC_BLOCKFROST_API="https://cardano-preprod.blockfrost.io/api/v0"
   // export NEXT_PUBLIC_NETWORK_PARAMS_URL="https://d1t0d7c2nekuk0.cloudfront.net/preprod.json"
 
+  // TEIKI Helios Code
+  // https://github.com/teiki-network/teiki-protocol/blob/main/src/contracts/backing/proof-of-backing.mp/main.ts
+
   const optimize = false;
   const script = props.script as string;
 
@@ -295,6 +298,7 @@ const Home: NextPage = (props: any) => {
     // Get wallet UTXOs
     const walletHelper = new WalletHelper(walletAPI);
     const adaAmountVal = new Value(BigInt(1000000));
+    
     const utxos = await walletHelper.pickUtxos(adaAmountVal);
 
     // Get change address
@@ -390,13 +394,22 @@ const Home: NextPage = (props: any) => {
 
   struct Datum {
       admin: PubKeyHash
+      participants: [] PubKeyHash
 
       func is_admin(self, tx: Tx) -> Bool { tx.is_signed_by(self.admin) }
   }
+
+  enum Redeemer {
+    Admin
+  }
   
-  func main(datum: Datum, context: ScriptContext) -> Bool {
+  func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
-      datum.is_admin(tx).trace("IS_ADMIN: ")
+      redeemer.switch {
+        Admin => {
+            datum.is_admin(tx).trace("IS_ADMIN: ")
+        }
+    }
   }` as string
 
   const lockNftDatumScript = `
@@ -505,9 +518,6 @@ const Home: NextPage = (props: any) => {
 
     // Compile the Helios script 
     const compiledScript = Program.new(lockNftScript).compile(optimize);
-
-    // Construct the datum
-    const inlineDatum = Datum.inline(generatePublicSaleDatum(changeAddr))
 
     const emptyRedeemer = new ConstrData(0, []);
 
