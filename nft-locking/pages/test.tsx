@@ -194,6 +194,7 @@ const Home: NextPage = (props: any) => {
   const logUtxo = (utxo: UTxO) => {
     console.log('asd')
     console.log('utxo: ' + utxo.address.toBech32())
+    console.log('utxo: ' + utxo.txId.bytes)
     console.log('utxo: ' + utxo.txId.hex)
     console.log('utxo: ' + utxo.utxoIdx)
     console.log('utxo: ' + utxo.value.lovelace)

@@ -82,9 +82,9 @@ const Home: NextPage = (props: any) => {
       .evalParam("DATUM").data
   }
 
-  useEffect(() => {
-    console.log('Hello world!');
-  }, []);
+  // useEffect(() => {
+  //   console.log('Hello world!');
+  // }, []);
 
 
   const doSomething = async () => {
@@ -107,9 +107,10 @@ const Home: NextPage = (props: any) => {
       BigInt(1)
     );
 
-    const alice = network.createWallet(BigInt(100_000_000));
-    // const alice = network.createWallet(BigInt(100_000_000), assets);
-    const bruce = network.createWallet(BigInt(100_000_000));
+    // const alice = network.createWallet(BigInt(100_000_000));
+    const alice = network.createWallet(BigInt(100_000_000), assets);
+
+    const bruce = network.createWallet(BigInt(1_000_000_000));
 
     network.tick(BigInt(10));
 
@@ -157,6 +158,8 @@ const Home: NextPage = (props: any) => {
 
     const lockedVal = new Value(BigInt(0), new Assets([[mintProgram.mintingPolicyHash, tokens]]));
 
+    console.log('mintProgram.mintingPolicyHash: ' + mintProgram.mintingPolicyHash.hex)
+
     // Minting TX
     const tx = new Tx();
 
@@ -186,14 +189,16 @@ const Home: NextPage = (props: any) => {
 
     network.tick(BigInt(10));
 
+    console.log('------')
+
     const finalAliceUtxos = await network.getUtxos(alice.address)
     finalAliceUtxos.forEach(utxo => logUtxo(utxo))
 
   }
 
   const logUtxo = (utxo: UTxO) => {
-    console.log('asd')
     console.log('utxo: ' + utxo.address.toBech32())
+    // console.log('utxo: ' + utxo.txId.bytes)
     console.log('utxo: ' + utxo.txId.hex)
     console.log('utxo: ' + utxo.utxoIdx)
     console.log('utxo: ' + utxo.value.lovelace)
