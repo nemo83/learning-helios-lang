@@ -50,13 +50,17 @@ const Home: NextPage = (props: any) => {
 
   struct Datum {
       admin: PubKeyHash
-      participants: [] PubKeyHash
+      ticketPrice: Value
+      participants: []PubKeyHash
 
       func is_admin(self, tx: Tx) -> Bool { tx.is_signed_by(self.admin) }
   }
 
   enum Redeemer {
     Admin
+    JoinRaffle {
+      pkh: PubKeyHash
+    }
   }
   
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
@@ -64,28 +68,30 @@ const Home: NextPage = (props: any) => {
       redeemer.switch {
         Admin => {
             datum.is_admin(tx).trace("IS_ADMIN: ")
+        },
+        joinRaffle: JoinRaffle => {
+          // Test 3 things
+          // 1. ticketPrice is paid into the contract (that all that was in the script, + the ticket price , is sent to the datum)
+          // 2. uxto where previous datum leaves to be spent
+          // 3. new datum is like current + participants contains the pkh of current signer.
+          if (!tx.is_signed_by(joinRaffle.pkh)) {
+            false
+          } else {
+            
+            valueLocked: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), datum, true);
+
+            expectedTargetValue: Value = valueLocked + datum.ticketPrice;
+  
+            new_datum: Datum = Datum { datum.admin, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh) };
+  
+            actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
+  
+            actualTargetValue >= expectedTargetValue
+
+          }
         }
     }
   }` as string
-
-  const lockNftDatumScript = `
-  const ADMIN_BYTES   = # // must be 28 bytes long
-  
-  const DATUM = Datum{
-    admin: PubKeyHash::new(ADMIN_BYTES)
-  }` as string
-
-  const generatePublicSaleDatum = (admin: any) => {
-    // public sale, don't set the buyer bytes
-    return Program.new(lockNftScript + lockNftDatumScript)
-      .changeParam("ADMIN_BYTES", JSON.stringify(admin.pubKeyHash.bytes))
-      .evalParam("DATUM").data
-  }
-
-  useEffect(() => {
-    console.log('Hello world!');
-  }, []);
-
 
   const doSomething = async () => {
 
@@ -103,7 +109,7 @@ const Home: NextPage = (props: any) => {
       MintingPolicyHash.fromHex(
         '16aa5486dab6527c4697387736ae449411c03dcd20a3950453e6779c'
       ),
-      Array.from(new TextEncoder().encode('PodgyPenguin1047')),
+      Array.from(new TextEncoder().encode(nftName)),
       BigInt(1)
     );
 
@@ -113,11 +119,53 @@ const Home: NextPage = (props: any) => {
 
     network.tick(BigInt(10));
 
+    const program = Program.new(lockNftScript)
+    const datum = new (program.types.Datum)(
+      alice.address.pubKeyHash,
+      new Value(BigInt(5000000)),
+      [alice.address.pubKeyHash, bruce.address.pubKeyHash]
+    )
+
+    // const datum = generatePublicSaleDatum(alice.address, [alice.address, bruce.address])
+
+    console.log('datum: ' + datum.toSchemaJson())
+
     const aliceUtxos = await network.getUtxos(alice.address)
 
     aliceUtxos.forEach(utxo => logUtxo(utxo))
 
-    
+    // Compile the helios minting script
+    const mintProgram = Program.new(lockNftScript).compile(false);
+
+
+    // // Minting TX
+    // const tx = new Tx();
+
+    // const utxos = await network.getUtxos(alice.address)
+    // await tx
+    //   .addInputs(await network.getUtxos(alice.address))
+    //   .attachScript(mintProgram)
+    //   // .addOutput(new TxOutput(alice.address, lockedVal))
+    //   .addCollateral(aliceUtxos[1])
+    //   .finalize(networkParams, alice.address);
+
+    // console.log("tx after final", tx.dump());
+
+    // console.log("Verifying signature...");
+    // const signatures = await alice.signTx(tx);
+    // tx.addSignatures(signatures);
+
+    // console.log("Submitting transaction...");
+    // const txHash = await alice.submitTx(tx);
+    // console.log('txHash: ' + txHash.hex)
+
+    // network.tick(BigInt(10));
+
+    // console.log('------')
+
+    // const finalAliceUtxos = await network.getUtxos(alice.address)
+    // finalAliceUtxos.forEach(utxo => logUtxo(utxo))
+
 
   }
 
