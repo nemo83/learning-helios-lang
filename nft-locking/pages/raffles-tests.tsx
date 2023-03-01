@@ -29,10 +29,15 @@ import {
   UTxO,
   WalletHelper,
   ByteArray,
-  PubKeyHash
+  PubKeyHash,
+  WalletEmulator,
+  UplcProgram,
+  HeliosData,
+  UplcList,
+  UplcData
 } from "@hyperionbt/helios";
 
-import path from 'path';
+import path, { toNamespacedPath } from 'path';
 import { promises as fs } from 'fs';
 
 declare global {
@@ -67,15 +72,16 @@ const Home: NextPage = (props: any) => {
       tx: Tx = context.tx;
       redeemer.switch {
         Admin => {
-            datum.is_admin(tx).trace("IS_ADMIN: ")
+            datum.is_admin(tx).trace("TRACE_IS_ADMIN: ")
         },
         joinRaffle: JoinRaffle => {
+          
           // Test 3 things
           // 1. ticketPrice is paid into the contract (that all that was in the script, + the ticket price , is sent to the datum)
           // 2. uxto where previous datum leaves to be spent
           // 3. new datum is like current + participants contains the pkh of current signer.
           if (!tx.is_signed_by(joinRaffle.pkh)) {
-            false
+            false.trace("TRACE_SIGNED_BY_PARTICIPANT: ")
           } else {
             
             valueLocked: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), datum, true);
@@ -86,7 +92,7 @@ const Home: NextPage = (props: any) => {
   
             actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
   
-            actualTargetValue >= expectedTargetValue
+            (actualTargetValue >= expectedTargetValue).trace("TRACE_ALL_GOOD? ")
 
           }
         }
@@ -113,69 +119,173 @@ const Home: NextPage = (props: any) => {
       BigInt(1)
     );
 
-    const alice = network.createWallet(BigInt(100_000_000));
-    // const alice = network.createWallet(BigInt(100_000_000), assets);
+    // const alice = network.createWallet(BigInt(100_000_000));
+    const alice = network.createWallet(BigInt(100_000_000), assets);
+    network.tick(BigInt(10));
+
     const bruce = network.createWallet(BigInt(100_000_000));
+    network.tick(BigInt(10));
+
+    console.log('Alice PKH: ' + alice.pubKeyHash.hex)
+    console.log('Bruce PKH: ' + bruce.pubKeyHash.hex)
 
     network.tick(BigInt(10));
 
-    const program = Program.new(lockNftScript)
-    const datum = new (program.types.Datum)(
-      alice.address.pubKeyHash,
-      new Value(BigInt(5000000)),
-      [alice.address.pubKeyHash, bruce.address.pubKeyHash]
-    )
-
-    // const datum = generatePublicSaleDatum(alice.address, [alice.address, bruce.address])
-
-    console.log('datum: ' + datum.toSchemaJson())
-
-    const aliceUtxos = await network.getUtxos(alice.address)
-
-    aliceUtxos.forEach(utxo => logUtxo(utxo))
+    inspectUTxOsAtAddress(alice.address, "Alice Address at the beginning", network)
+    inspectUTxOsAtAddress(bruce.address, "Bruce Address at the beginning", network)
 
     // Compile the helios minting script
-    const mintProgram = Program.new(lockNftScript).compile(false);
+    const raffleProgram = Program.new(lockNftScript);
+    const raffleUplcProgram = raffleProgram.compile(false);
 
+    // Extract the validator script address
+    const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
+    console.log('valAddr: ' + raffleAddress.toBech32())
 
-    // // Minting TX
-    // const tx = new Tx();
+    const currentDatum = await lockRaffleNft(alice, bruce, raffleAddress, assets, network, networkParams, raffleProgram)
 
-    // const utxos = await network.getUtxos(alice.address)
-    // await tx
-    //   .addInputs(await network.getUtxos(alice.address))
-    //   .attachScript(mintProgram)
-    //   // .addOutput(new TxOutput(alice.address, lockedVal))
-    //   .addCollateral(aliceUtxos[1])
-    //   .finalize(networkParams, alice.address);
-
-    // console.log("tx after final", tx.dump());
-
-    // console.log("Verifying signature...");
-    // const signatures = await alice.signTx(tx);
-    // tx.addSignatures(signatures);
-
-    // console.log("Submitting transaction...");
-    // const txHash = await alice.submitTx(tx);
-    // console.log('txHash: ' + txHash.hex)
-
-    // network.tick(BigInt(10));
-
-    // console.log('------')
-
-    // const finalAliceUtxos = await network.getUtxos(alice.address)
-    // finalAliceUtxos.forEach(utxo => logUtxo(utxo))
-
+    await joinRaffle(bruce, raffleAddress, network, networkParams, raffleProgram, raffleUplcProgram)
 
   }
 
+  const lockRaffleNft = async (
+    alice: WalletEmulator,
+    bruce: WalletEmulator,
+    raffleAddress: Address,
+    assets: Assets,
+    network: NetworkEmulator,
+    networkParams: NetworkParams,
+    program: Program
+  ) => {
+
+    // Lock NFT Prize in contract TX
+    const tx = new Tx();
+
+    // NFT and 2 $ada to send to SC
+    const nftValue = new Value(BigInt(2_000_000), assets)
+
+    // Datum
+    const raffleDatum = new (program.types.Datum)(
+      alice.address.pubKeyHash,
+      new Value(BigInt(5000000)),
+      []
+    )
+
+    console.log('DATUM: ' + raffleDatum.toSchemaJson())
+
+    await tx
+      .addInputs(await network.getUtxos(alice.address))
+      .addOutput(new TxOutput(raffleAddress, nftValue, Datum.inline(raffleDatum._toUplcData())))
+      .finalize(networkParams, alice.address);
+
+    console.log("tx after final", tx.dump());
+
+    console.log("Verifying signature...");
+    const signatures = await alice.signTx(tx);
+    tx.addSignatures(signatures);
+
+    console.log("Submitting transaction...");
+    const txHash = await alice.submitTx(tx);
+    console.log('txHash: ' + txHash.hex)
+
+    network.tick(BigInt(10));
+
+    inspectUTxOsAtAddress(alice.address, 'Alice', network)
+    inspectUTxOsAtAddress(bruce.address, 'Bruce', network)
+    inspectUTxOsAtAddress(raffleAddress, 'Raffle Validation Script', network)
+
+    raffleDatum
+  }
+
+  const joinRaffle = async (
+    bruce: WalletEmulator,
+    raffleAddress: Address,
+    network: NetworkEmulator,
+    networkParams: NetworkParams,
+    program: Program,
+    uplcProgram: UplcProgram
+  ) => {
+
+    const tx = new Tx();
+
+    // Join raffle by paying 5 $ada
+    const nftValue = new Value(BigInt(5_000_000))
+
+    const scriptUtxos = await network.getUtxos(raffleAddress)
+    const nonEmptyDatumUtxo = scriptUtxos.filter(utxo => utxo.origOutput.datum != null)
+
+    if (nonEmptyDatumUtxo.length > 0) {
+      const foo = nonEmptyDatumUtxo[0].origOutput.datum.data as ListData
+      const adminPkh = PubKeyHash.fromUplcData(foo.list[0])
+      console.log('adminPkh: ' + adminPkh.hex)
+
+      const ticketPrice = Value.fromUplcData(foo.list[1])
+      console.log('ticketPrice: ' + ticketPrice.toSchemaJson())
+
+      const participants = (foo.list[2] as ListData).list.map(item => PubKeyHash.fromUplcData(item))
+      console.log('participants: ' + participants)
+
+      const newParticipants = participants.slice()
+      newParticipants.unshift(bruce.address.pubKeyHash)
+
+      const newDatum = new (program.types.Datum)(
+        adminPkh,
+        ticketPrice,
+        newParticipants
+      )
+
+      const input = nonEmptyDatumUtxo[0]
+
+      const bruceUtxos = await network.getUtxos(bruce.address)
+
+      const targetValue = ticketPrice.add(nonEmptyDatumUtxo[0].value)
+
+      const valRedeemer = new ConstrData(1, [bruce.pubKeyHash._toUplcData()]);
+
+      const tx = new Tx();
+      await tx.addInput(input, valRedeemer)
+        .addInput(bruceUtxos[0])
+        .addOutput(new TxOutput(raffleAddress, targetValue, Datum.inline(newDatum._toUplcData())))
+        .attachScript(uplcProgram)
+        .addSigner(bruce.pubKeyHash)
+        .finalize(networkParams, bruce.address)
+
+      console.log("tx after final", tx.dump());
+
+      console.log("Verifying signature...");
+      const signatures = await bruce.signTx(tx);
+      tx.addSignatures(signatures);
+
+      console.log("Submitting transaction...");
+      const txHash = await bruce.submitTx(tx);
+      console.log('txHash: ' + txHash.hex)
+
+      network.tick(BigInt(10));
+
+      inspectUTxOsAtAddress(bruce.address, 'Alice', network)
+      inspectUTxOsAtAddress(raffleAddress, 'Raffle Validation Script', network)
+
+    } else {
+      console.log('datum not found')
+    }
+
+  }
+
+  const inspectUTxOsAtAddress = async (address: Address, address_name: string, network: NetworkEmulator) => {
+    console.log(`------ Address Name ${address_name} ------ `)
+    const utxos = await network.getUtxos(address)
+    utxos.forEach(utxo => logUtxo(utxo))
+  }
+
   const logUtxo = (utxo: UTxO) => {
-    console.log('asd')
-    console.log('utxo: ' + utxo.address.toBech32())
-    console.log('utxo: ' + utxo.txId.bytes)
     console.log('utxo: ' + utxo.txId.hex)
     console.log('utxo: ' + utxo.utxoIdx)
     console.log('utxo: ' + utxo.value.lovelace)
+    if (utxo.origOutput.datum != null) {
+      console.log('datum: 1' + utxo.origOutput.datum.data)
+      console.log('datum: 2' + utxo.origOutput.datum.dump())
+      console.log('datum: 3' + utxo.origOutput.datum.toData())
+    }
     utxo.value.assets.mintingPolicies.forEach(mph => {
       console.log('mph: ' + mph.hex)
     })

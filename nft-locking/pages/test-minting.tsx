@@ -161,19 +161,16 @@ const Home: NextPage = (props: any) => {
     console.log('mintProgram.mintingPolicyHash: ' + mintProgram.mintingPolicyHash.hex)
 
     // Minting TX
+
+    const nft = new Value(BigInt(2_000_000), new Assets([[mintProgram.mintingPolicyHash, tokens]]))
+
     const tx = new Tx();
 
     const utxos = await network.getUtxos(alice.address)
     await tx
       .addInputs(await network.getUtxos(alice.address))
       .attachScript(mintProgram)
-      // The minting
-      .mintTokens(
-        mintProgram.mintingPolicyHash,
-        tokens,
-        mintRedeemer
-      )
-      .addOutput(new TxOutput(alice.address, lockedVal))
+      .addOutput(new TxOutput(alice.address, nft))
       .addCollateral(aliceUtxos[1])
       .finalize(networkParams, alice.address);
 
