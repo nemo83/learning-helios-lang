@@ -50,6 +50,10 @@ const Home: NextPage = (props: any) => {
 
   const nftName = 'My Cool NFT'
 
+  const nftMph = MintingPolicyHash.fromHex(
+    '16aa5486dab6527c4697387736ae449411c03dcd20a3950453e6779c'
+  )
+
   const lockNftScript = `
   spending lock_nft
 
@@ -70,6 +74,7 @@ const Home: NextPage = (props: any) => {
   
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
+      print("hello world");
       redeemer.switch {
         Admin => {
             datum.is_admin(tx).trace("TRACE_IS_ADMIN: ")
@@ -112,9 +117,7 @@ const Home: NextPage = (props: any) => {
     const assets = new Assets();
 
     assets.addComponent(
-      MintingPolicyHash.fromHex(
-        '16aa5486dab6527c4697387736ae449411c03dcd20a3950453e6779c'
-      ),
+      nftMph,
       Array.from(new TextEncoder().encode(nftName)),
       BigInt(1)
     );
@@ -171,7 +174,8 @@ const Home: NextPage = (props: any) => {
       []
     )
 
-    console.log('DATUM: ' + raffleDatum.toSchemaJson())
+    console.log('DATUM 1: ' + raffleDatum)
+    console.log('DATUM 1: ' + raffleDatum.toSchemaJson())
 
     await tx
       .addInputs(await network.getUtxos(alice.address))
@@ -236,15 +240,21 @@ const Home: NextPage = (props: any) => {
 
       const input = nonEmptyDatumUtxo[0]
 
+      console.log('DATUM 2: ' + input.origOutput.datum.toData())
+      console.log('DATUM 2: ' + input.origOutput.datum.toData().toSchemaJson())
+
       const bruceUtxos = await network.getUtxos(bruce.address)
 
       const targetValue = ticketPrice.add(nonEmptyDatumUtxo[0].value)
 
-      const valRedeemer = new ConstrData(1, [bruce.pubKeyHash._toUplcData()]);
+      // Building redeemer manually
+      // const valRedeemer = new ConstrData(1, [bruce.pubKeyHash._toUplcData()]);
+      // Using types
+      const valRedeemer = (new (program.types.Redeemer.JoinRaffle)(bruce.pubKeyHash))._toUplcData()
 
       const tx = new Tx();
       await tx.addInput(input, valRedeemer)
-        .addInput(bruceUtxos[0])
+        .addInputs(bruceUtxos)
         .addOutput(new TxOutput(raffleAddress, targetValue, Datum.inline(newDatum._toUplcData())))
         .attachScript(uplcProgram)
         .addSigner(bruce.pubKeyHash)
@@ -281,10 +291,13 @@ const Home: NextPage = (props: any) => {
     console.log('utxo: ' + utxo.txId.hex)
     console.log('utxo: ' + utxo.utxoIdx)
     console.log('utxo: ' + utxo.value.lovelace)
+    if (utxo.value.assets != null ){
+      console.log('contains nft? ' + utxo.value.assets.has(nftMph, Array.from(new TextEncoder().encode(nftName))))
+    }
     if (utxo.origOutput.datum != null) {
-      console.log('datum: 1' + utxo.origOutput.datum.data)
-      console.log('datum: 2' + utxo.origOutput.datum.dump())
-      console.log('datum: 3' + utxo.origOutput.datum.toData())
+      console.log('datum: ' + utxo.origOutput.datum.data)
+      console.log('datum: ' + utxo.origOutput.datum.dump())
+      console.log('datum: ' + utxo.origOutput.datum.toData())
     }
     utxo.value.assets.mintingPolicies.forEach(mph => {
       console.log('mph: ' + mph.hex)
