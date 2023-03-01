@@ -145,9 +145,15 @@ const Home: NextPage = (props: any) => {
     const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
     console.log('valAddr: ' + raffleAddress.toBech32())
 
-    const currentDatum = await lockRaffleNft(alice, bruce, raffleAddress, assets, network, networkParams, raffleProgram)
+    await lockRaffleNft(alice, bruce, raffleAddress, assets, network, networkParams, raffleProgram)
 
-    await joinRaffle(bruce, raffleAddress, network, networkParams, raffleProgram, raffleUplcProgram)
+    network.tick(BigInt(10));
+
+    await retrieveNft(bruce, raffleAddress, network, networkParams, raffleProgram, raffleUplcProgram)
+
+    // network.tick(BigInt(10));
+
+    // await joinRaffle(bruce, raffleAddress, network, networkParams, raffleProgram, raffleUplcProgram)
 
   }
 
@@ -199,6 +205,57 @@ const Home: NextPage = (props: any) => {
     inspectUTxOsAtAddress(raffleAddress, 'Raffle Validation Script', network)
 
     raffleDatum
+
+  }
+
+  const retrieveNft = async (
+    alice: WalletEmulator,
+    raffleAddress: Address,
+    network: NetworkEmulator,
+    networkParams: NetworkParams,
+    program: Program,
+    uplcProgram: UplcProgram
+  ) => {
+
+    const tx = new Tx();
+
+    const scriptUtxos = await network.getUtxos(raffleAddress)
+    const nonEmptyDatumUtxo = scriptUtxos.filter(utxo => utxo.origOutput.datum != null)
+
+    if (nonEmptyDatumUtxo.length > 0) {
+
+      const bruceUtxos = await network.getUtxos(alice.address)
+
+      const valRedeemer = new ConstrData(0, []);
+      // const valRedeemer = (new (program.types.Redeemer.Admin)([]))._toUplcData()
+
+      const tx = new Tx();
+      await tx.addInput(nonEmptyDatumUtxo[0], valRedeemer)
+        .addInputs(bruceUtxos)
+        .addOutput(new TxOutput(alice.address, nonEmptyDatumUtxo[0].value, nonEmptyDatumUtxo[0].origOutput.datum))
+        .attachScript(uplcProgram)
+        .addSigner(alice.pubKeyHash)
+        .finalize(networkParams, alice.address)
+
+      console.log("tx after final", tx.dump());
+
+      console.log("Verifying signature...");
+      const signatures = await alice.signTx(tx);
+      tx.addSignatures(signatures);
+
+      console.log("Submitting transaction...");
+      const txHash = await alice.submitTx(tx);
+      console.log('txHash: ' + txHash.hex)
+
+      network.tick(BigInt(10));
+
+      inspectUTxOsAtAddress(alice.address, 'Alice', network)
+      inspectUTxOsAtAddress(raffleAddress, 'Raffle Validation Script', network)
+
+    } else {
+      console.log('datum not found')
+    }
+
   }
 
   const joinRaffle = async (
@@ -291,7 +348,7 @@ const Home: NextPage = (props: any) => {
     console.log('utxo: ' + utxo.txId.hex)
     console.log('utxo: ' + utxo.utxoIdx)
     console.log('utxo: ' + utxo.value.lovelace)
-    if (utxo.value.assets != null ){
+    if (utxo.value.assets != null) {
       console.log('contains nft? ' + utxo.value.assets.has(nftMph, Array.from(new TextEncoder().encode(nftName))))
     }
     if (utxo.origOutput.datum != null) {
