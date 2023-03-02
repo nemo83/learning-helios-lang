@@ -228,9 +228,10 @@ const Home: NextPage = (props: any) => {
 
   struct Datum {
       admin: PubKeyHash
-      scriptPkh: PubKeyHash
       ticketPrice: Value
+      num_max_participants: Int
       participants: []PubKeyHash
+      seed_hash: ByteArray
 
       func is_admin(self, tx: Tx) -> Bool { tx.is_signed_by(self.admin) }
   }
@@ -240,6 +241,14 @@ const Home: NextPage = (props: any) => {
     JoinRaffle {
       pkh: PubKeyHash
     }
+    SelectWinner {
+      seed: ByteArray
+      salt: ByteArray
+    }
+  }
+
+  func isValidParticipantsSignature(tx: Tx, join_raffle: JoinRaffle) -> Bool {
+    tx.is_signed_by(joinRaffle.pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")
   }
   
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
@@ -252,17 +261,20 @@ const Home: NextPage = (props: any) => {
         joinRaffle: JoinRaffle => {
 
           // Test 3 things
-          // 1. ticketPrice is paid into the contract (that all that was in the script, + the ticket price , is sent to the datum)
-          // 2. uxto where previous datum leaves to be spent
+          // 1. ticketPrice is paid into the contract (that all that was in the script, + the ticket price , is sent to the new Utxo + Datum)
+          // 2. previous uxto is spent spent
           // 3. new datum is like current + participants contains the pkh of current signer.
-          if ( !(tx.is_signed_by(joinRaffle.pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")) ) {
+          if ( !isValidParticipantsSignature(tx, redeemer) ) {
             false
           } else {
             
+            // Get the input currently being spent by the script, but not those coming for wallet
             input: TxOutput = context.get_current_input().output;
 
+            // This ensures 
             new_datum: Datum = Datum { datum.admin, datum.scriptPkh, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh) };
 
+            // value_locked_by_datum only _sees_ TxOutputs of the script
             actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
 
             expectedTargetValue: Value = input.value + datum.ticketPrice;
