@@ -245,9 +245,6 @@ const Home: NextPage = (props: any) => {
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
 
-      print("Script PHK: " + datum.scriptPkh.show());
-      print("Validator Hash: " + context.get_current_validator_hash().show());
-
       redeemer.switch {
         Admin => {
             datum.is_admin(tx).trace("TRACE_IS_ADMIN: ")
@@ -258,29 +255,18 @@ const Home: NextPage = (props: any) => {
           // 1. ticketPrice is paid into the contract (that all that was in the script, + the ticket price , is sent to the datum)
           // 2. uxto where previous datum leaves to be spent
           // 3. new datum is like current + participants contains the pkh of current signer.
-          if ( !(tx.is_signed_by(joinRaffle.pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")) && 
-                !(datum.scriptPkh.serialize().ends_with(context.get_current_validator_hash().serialize()).trace("WTF: ")) ) {
+          if ( !(tx.is_signed_by(joinRaffle.pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")) ) {
             false
           } else {
             
-            valueLocked: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), datum, true);
+            input: TxOutput = context.get_current_input().output;
 
-            expectedTargetValue: Value = valueLocked + datum.ticketPrice;
+            new_datum: Datum = Datum { datum.admin, datum.scriptPkh, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh) };
 
-            // new_datum: Datum = Datum { datum.admin, datum.scriptPkh, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh) };
-  
-            // actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
-  
-            //script_pkh: PubKeyHash = PubKeyHash::new(context.get_current_validator_hash().serialize());
-            //print("script_pkh: " + script_pkh.show());
+            actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
 
-            // actualTargetValue: Value = tx.value_sent_to_datum(datum.scriptPkh, new_datum, true);
+            expectedTargetValue: Value = input.value + datum.ticketPrice;
 
-            // output: TxOutput = tx.outputs.find(output => (output.datum == new_datum).trace("DATUM! ") && output.address.serialize().ends_with(context.get_current_validator_hash().serialize()).trace("WTF: "));
-            output: TxOutput = tx.outputs.find((output: TxOutput) -> {
-              output.address.serialize().ends_with(context.get_current_validator_hash().serialize()).trace("WTF: ")
-            });
-            actualTargetValue: Value = output.value;
             (actualTargetValue >= expectedTargetValue).trace("TRACE_ALL_GOOD? ")
 
           }
@@ -289,7 +275,7 @@ const Home: NextPage = (props: any) => {
   }` as string
 
   const nftMph = MintingPolicyHash.fromHex(
-    '255fcaf9aa7d15d76c275c0822db4303d49dd0ecd764f822e78337ba'
+    'fb3fe93a966f3e3255f2b938859fb7b8e320d9d2d7aee0fc8063dd43'
   )
 
   // const networkParamsUrl = 'https://d1t0d7c2nekuk0.cloudfront.net/preprod.json';
