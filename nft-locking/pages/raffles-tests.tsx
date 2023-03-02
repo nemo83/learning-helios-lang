@@ -106,6 +106,8 @@ const Home: NextPage = (props: any) => {
 
   const doSomething = async () => {
 
+    const useNetworkEmulator = false;
+
     const network = new NetworkEmulator();
 
     const networkParams = new NetworkParams(
