@@ -242,7 +242,7 @@ const Home: NextPage = (props: any) => {
       pkh: PubKeyHash
     }
     SelectWinner {
-      seed: ByteArray
+      seed: Int
       salt: ByteArray
     }
   }
@@ -251,6 +251,10 @@ const Home: NextPage = (props: any) => {
     tx.is_signed_by(joinRaffle.pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")
   }
   
+  func selectWinningIndex(seed: Int, numParticipants: Int) -> Int {
+    ((1103515245 * seed + 12345) % 2147483648) % numParticipants
+  }
+
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
 
@@ -282,6 +286,13 @@ const Home: NextPage = (props: any) => {
             (actualTargetValue >= expectedTargetValue).trace("TRACE_ALL_GOOD? ")
 
           }
+        },
+        selectWinner: SelectWinner => {
+
+          // Test
+          // 1. Salt + seed hashed = seed_hash
+          // 2. The NFT is sent to a the vault script
+
         }
     }
   }` as string
