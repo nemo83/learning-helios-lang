@@ -228,7 +228,6 @@ const Home: NextPage = (props: any) => {
 
   struct Datum {
       admin: PubKeyHash
-      scriptPkh: PubKeyHash
       ticketPrice: Value
       participants: []PubKeyHash
 
@@ -261,7 +260,7 @@ const Home: NextPage = (props: any) => {
             
             input: TxOutput = context.get_current_input().output;
 
-            new_datum: Datum = Datum { datum.admin, datum.scriptPkh, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh) };
+            new_datum: Datum = Datum { datum.admin, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh) };
 
             actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
 
@@ -377,7 +376,6 @@ const Home: NextPage = (props: any) => {
     // Datum
     const raffleDatum = new (raffleProgram.types.Datum)(
       walletBaseAddress.pubKeyHash,
-      raffleUplcProgram.validatorHash.bytes,
       new Value(BigInt(5000000)),
       []
     )
@@ -489,13 +487,10 @@ const Home: NextPage = (props: any) => {
     const adminPkh = PubKeyHash.fromUplcData(foo.list[0])
     console.log('adminPkh: ' + adminPkh.hex)
 
-    const valHash = ValidatorHash.fromUplcData(foo.list[1])
-    console.log('adminPkh: ' + adminPkh.hex)
-
-    const ticketPrice = Value.fromUplcData(foo.list[2])
+    const ticketPrice = Value.fromUplcData(foo.list[1])
     console.log('ticketPrice: ' + ticketPrice.toSchemaJson())
 
-    const participants = (foo.list[3] as ListData).list.map(item => PubKeyHash.fromUplcData(item))
+    const participants = (foo.list[2] as ListData).list.map(item => PubKeyHash.fromUplcData(item))
     console.log('participants: ' + participants)
 
     const newParticipants = participants.slice()
@@ -504,7 +499,6 @@ const Home: NextPage = (props: any) => {
 
     const newDatum = new (raffleProgram.types.Datum)(
       adminPkh,
-      valHash.bytes,
       ticketPrice,
       newParticipants
     )
