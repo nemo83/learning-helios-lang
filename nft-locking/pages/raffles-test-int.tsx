@@ -31,7 +31,8 @@ import {
   ByteArray,
   PubKeyHash,
   ValidatorHash,
-  CborData
+  CborData,
+  Int
 } from "@hyperionbt/helios";
 
 import path from 'path';
@@ -73,7 +74,7 @@ const Home: NextPage = (props: any) => {
   // 84e63b95bdf0fcab9d4f48349d641c6616884f0ed8bfcf924b4d3b77
   // export NEXT_PUBLIC_BLOCKFROST_API_KEY="get-your-blockfrost-api-key"
   // export NEXT_PUBLIC_BLOCKFROST_API="https://cardano-preprod.blockfrost.io/api/v0"
-  // export NEXT_PUBLIC_NETWORK_PARAMS_URL="https://d1t0d7c2nekuk0.cloudfront.net/preprod.json"
+  // export NEXT_PUBLIC_NETWORK_PARAMS_URL="https://d1t0d7c2nekuk0.cloudfront.net/preview.json"
 
   // TEIKI Helios Code
   // https://github.com/teiki-network/teiki-protocol/blob/main/src/contracts/backing/proof-of-backing.mp/main.ts
@@ -83,9 +84,9 @@ const Home: NextPage = (props: any) => {
 
   // const lockNftScript = props.lockNftScript as string
 
-  const networkParamsUrl = 'https://d1t0d7c2nekuk0.cloudfront.net/preprod.json';
-  const blockfrostAPI = 'https://cardano-preprod.blockfrost.io/api/v0';
-  const apiKey: string = 'preprod7n2umhQInyWsV1G5okvuuhRBZf3lE05e'; //process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY as string;
+  const networkParamsUrl = 'https://d1t0d7c2nekuk0.cloudfront.net/preview.json';
+  const blockfrostAPI = 'https://cardano-preview.blockfrost.io/api/v0';
+  const apiKey: string = 'previewf5cTYv6hK1PYwgrnWPobtf0Y3EwMQRrY'; //process.env.NEXT_PUBLIC_BLOCKFROST_API_KEY as string;
 
   const [walletAPI, setWalletAPI] = useState<undefined | any>(undefined);
   const [tx, setTx] = useState({ txId: '' });
@@ -248,6 +249,14 @@ const Home: NextPage = (props: any) => {
       salt: ByteArray
     }
   }
+
+  func raffle_not_full(datum: Datum) -> Bool {
+    (datum.participants.length < datum.numMaxParticipants).trace("RAFFLE_NOT_FULL: ")
+  }
+
+  func is_signed_by_participant(tx: Tx, participants_pkh: PubKeyHash) -> Bool {
+    tx.is_signed_by(participants_pkh).trace("SIGNED_BY_PARTICIPANT: ")
+  }
   
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
@@ -262,9 +271,7 @@ const Home: NextPage = (props: any) => {
           // 1. ticketPrice is paid into the contract (that all that was in the script, + the ticket price , is sent to the datum)
           // 2. uxto where previous datum leaves to be spent
           // 3. new datum is like current + participants contains the pkh of current signer.
-          if ( !(tx.is_signed_by(joinRaffle.pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")) ) {
-            false
-          } else {
+          if (is_signed_by_participant(tx, joinRaffle.pkh) && raffle_not_full(datum)) {
             
             input: TxOutput = context.get_current_input().output;
 
@@ -276,23 +283,23 @@ const Home: NextPage = (props: any) => {
 
             (actualTargetValue >= expectedTargetValue).trace("TRACE_ALL_GOOD? ")
 
+          } else {
+            false.trace("OVERALL_CHECK: ")
           }
         },
         selectWinner: SelectWinner => {
-          print("datum.seedHash: " + datum.seedHash.show());
-          print("selectWinner.seed: " + selectWinner.seed.show());
-          print("selectWinner.salt: " + selectWinner.salt.show());
           concats: ByteArray = selectWinner.seed + selectWinner.salt;
-          print("concats: " + concats.show());
           contactsSerSha: ByteArray = concats.sha2();
-          print("contactsSerSha: " + contactsSerSha.show());
-          datum.seedHash == contactsSerSha
+          // admin or enough participants
+          (datum.is_admin(tx).trace("TRACE_IS_ADMIN: ") || (datum.participants.length == datum.numMaxParticipants).trace("NUM_PARTICIPANTS: ")) &&
+          // the seed is valid
+          (datum.seedHash == contactsSerSha).trace("SEED_MATCH: ")
         }
     }
   }` as string
 
   const nftMph = MintingPolicyHash.fromHex(
-    'fb3fe93a966f3e3255f2b938859fb7b8e320d9d2d7aee0fc8063dd43'
+    'ba3dcfab067cd0739eaa821c9b2d74e6b15c96adcb6eb4dc497a5929'
   )
 
   const seed = "18062016"
@@ -430,7 +437,7 @@ const Home: NextPage = (props: any) => {
       walletBaseAddress.pubKeyHash,
       new Value(BigInt(5000000)),
       [],
-      5,
+      1,
       sha256(new TextEncoder().encode(saltedSeed)),
     )
 
@@ -547,6 +554,13 @@ const Home: NextPage = (props: any) => {
     const participants = (foo.list[2] as ListData).list.map(item => PubKeyHash.fromUplcData(item))
     console.log('participants: ' + participants)
 
+    const numMaxParticipants = Int.fromUplcData(foo.list[3])
+    console.log('numMaxParticipants: ' + numMaxParticipants)
+
+    const seedHash = ByteArray.fromUplcData(foo.list[4])
+    console.log('seedHash: ' + seedHash)
+
+
     const newParticipants = participants.slice()
     newParticipants.unshift(walletBaseAddress.pubKeyHash)
     console.log('newParticipants: ' + newParticipants)
@@ -554,7 +568,9 @@ const Home: NextPage = (props: any) => {
     const newDatum = new (raffleProgram.types.Datum)(
       adminPkh,
       ticketPrice,
-      newParticipants
+      newParticipants,
+      numMaxParticipants,
+      seedHash
     )
 
     const targetValue = ticketPrice.add(contractUtxo.value)
@@ -616,7 +632,7 @@ const Home: NextPage = (props: any) => {
     console.log('b')
     // const nonEmptyDatumUtxo = contractUtxo.filter(utxo => utxo.origOutput.datum != null)
 
-    const walletUtxos = await walletHelper.pickUtxos(new Value(BigInt(1_000_000)))
+    const walletUtxos = await walletHelper.pickUtxos(new Value(BigInt(5_000_000)))
     console.log('c')
     // const valRedeemer = new ConstrData(0, []);
     const valRedeemer = (new (raffleProgram.types.Redeemer.SelectWinner)(
@@ -644,6 +660,104 @@ const Home: NextPage = (props: any) => {
     const txHash = await walletAPI.submitTx(tx);
     console.log('txHash: ' + txHash.hex)
 
+
+  }
+
+  const mintNftInWallet = async () => {
+
+    console.log('mint nft')
+
+    // Get wallet UTXOs
+    const walletHelper = new WalletHelper(walletAPI);
+    const adaAmountVal = new Value(BigInt(1000000));
+
+    const utxos = await walletHelper.pickUtxos(adaAmountVal);
+
+    // Get change address
+    const changeAddr = await walletHelper.changeAddress;
+
+    // Determine the UTXO used for collateral
+    const colatUtxo = await walletHelper.pickCollateral();
+
+    // Start building the transaction
+    const tx = new Tx();
+
+    // Add the UTXO as inputs
+    tx.addInputs(utxos[0]);
+
+    const mintScript = `minting nft
+
+    const TX_ID: ByteArray = #` + utxos[0][0].txId.hex + `
+    const txId: TxId = TxId::new(TX_ID)
+    const outputId: TxOutputId = TxOutputId::new(txId, ` + utxos[0][0].utxoIdx + `)
+    
+    func main(ctx: ScriptContext) -> Bool {
+        tx: Tx = ctx.tx;
+        mph: MintingPolicyHash = ctx.get_current_minting_policy_hash();
+    
+        assetclass: AssetClass = AssetClass::new(
+            mph, 
+            "My Cool NFT".encode_utf8()
+        );
+        value_minted: Value = tx.minted;
+    
+        // Validator logic starts
+        (value_minted == Value::new(assetclass, 1)).trace("NFT1: ") &&
+        tx.inputs.any((input: TxInput) -> Bool {
+                                        (input.output_id == outputId).trace("NFT2: ")
+                                        }
+        )
+    }`
+
+    // Compile the helios minting script
+    const mintProgram = Program.new(mintScript).compile(optimize);
+
+    // Add the script as a witness to the transaction
+    tx.attachScript(mintProgram);
+
+    // Construct the NFT that we will want to send as an output
+    const nftTokenName = ByteArrayData.fromString(nftName).toHex();
+    const tokens: [number[], bigint][] = [[hexToBytes(nftTokenName), BigInt(1)]];
+
+    // Create an empty Redeemer because we must always send a Redeemer with
+    // a plutus script transaction even if we don't actually use it.
+    const mintRedeemer = new ConstrData(0, []);
+
+    // Indicate the minting we want to include as part of this transaction
+    tx.mintTokens(
+      mintProgram.mintingPolicyHash,
+      tokens,
+      mintRedeemer
+    )
+
+    const lockedVal = new Value(adaAmountVal.lovelace, new Assets([[mintProgram.mintingPolicyHash, tokens]]));
+
+    // Add the destination address and the amount of Ada to lock including a datum
+    tx.addOutput(new TxOutput(changeAddr, lockedVal));
+
+    // Add the collateral
+    tx.addCollateral(colatUtxo);
+
+    const networkParams = new NetworkParams(
+      await fetch(networkParamsUrl)
+        .then(response => response.json())
+    )
+    console.log("tx before final", tx.dump());
+
+    // Send any change back to the buyer
+    await tx.finalize(networkParams, changeAddr);
+    console.log("tx after final", tx.dump());
+
+    console.log("Verifying signature...");
+    const signatures = await walletAPI.signTx(tx);
+    tx.addSignatures(signatures);
+
+    console.log("Submitting transaction...");
+    const txHash = await walletAPI.submitTx(tx);
+
+    console.log("txHash", txHash.hex);
+    setTx({ txId: txHash.hex });
+    setThreadToken({ tt: mintProgram.mintingPolicyHash.hex });
 
   }
 
@@ -701,6 +815,9 @@ const Home: NextPage = (props: any) => {
         ) : null}
         {walletIsEnabled ? (
           <input type='button' value='Select Winner' onClick={() => selectWinner()} />
+        ) : null}
+        {walletIsEnabled ? (
+          <input type='button' value='Mint NFT' onClick={() => mintNftInWallet()} />
         ) : null}
 
 
