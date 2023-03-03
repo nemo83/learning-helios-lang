@@ -7,6 +7,7 @@ import type { NextPage } from 'next'
 import styles from '../styles/Home.module.css'
 import { useState, useEffect } from "react";
 import WalletInfo from '../components/WalletInfo';
+import { sha256, sha224 } from 'js-sha256';
 import {
   Assets,
   Address,
@@ -29,7 +30,8 @@ import {
   WalletHelper,
   ByteArray,
   PubKeyHash,
-  ValidatorHash
+  ValidatorHash,
+  CborData
 } from "@hyperionbt/helios";
 
 import path from 'path';
@@ -230,6 +232,8 @@ const Home: NextPage = (props: any) => {
       admin: PubKeyHash
       ticketPrice: Value
       participants: []PubKeyHash
+      numMaxParticipants: Int
+      seedHash: ByteArray
 
       func is_admin(self, tx: Tx) -> Bool { tx.is_signed_by(self.admin) }
   }
@@ -238,6 +242,10 @@ const Home: NextPage = (props: any) => {
     Admin
     JoinRaffle {
       pkh: PubKeyHash
+    }
+    SelectWinner {
+      seed: ByteArray
+      salt: ByteArray
     }
   }
   
@@ -260,7 +268,7 @@ const Home: NextPage = (props: any) => {
             
             input: TxOutput = context.get_current_input().output;
 
-            new_datum: Datum = Datum { datum.admin, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh) };
+            new_datum: Datum = Datum { datum.admin, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh), datum.numMaxParticipants, datum.seedHash };
 
             actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
 
@@ -269,6 +277,16 @@ const Home: NextPage = (props: any) => {
             (actualTargetValue >= expectedTargetValue).trace("TRACE_ALL_GOOD? ")
 
           }
+        },
+        selectWinner: SelectWinner => {
+          print("datum.seedHash: " + datum.seedHash.show());
+          print("selectWinner.seed: " + selectWinner.seed.show());
+          print("selectWinner.salt: " + selectWinner.salt.show());
+          concats: ByteArray = selectWinner.seed + selectWinner.salt;
+          print("concats: " + concats.show());
+          contactsSerSha: ByteArray = concats.sha2();
+          print("contactsSerSha: " + contactsSerSha.show());
+          datum.seedHash == contactsSerSha
         }
     }
   }` as string
@@ -276,6 +294,15 @@ const Home: NextPage = (props: any) => {
   const nftMph = MintingPolicyHash.fromHex(
     'fb3fe93a966f3e3255f2b938859fb7b8e320d9d2d7aee0fc8063dd43'
   )
+
+  const seed = "18062016"
+
+  const salt = "2808201708082021"
+
+  const saltedSeed = `${seed}${salt}`
+
+  const hashedSaltedSeed = sha256(saltedSeed)
+
 
   // const networkParamsUrl = 'https://d1t0d7c2nekuk0.cloudfront.net/preprod.json';
 
@@ -320,14 +347,39 @@ const Home: NextPage = (props: any) => {
     const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
     console.log('valAddr: ' + raffleAddress.toBech32())
 
-    const addHex = raffleAddress.bytes.slice(1)
-    console.log('addHex: ' + addHex)
+    console.log('saltedSeed: ' + saltedSeed)
 
-    const valHex = raffleUplcProgram.validatorHash.bytes
-    console.log('valHex: ' + valHex)
+    console.log('hashedSaltedSeed: ' + hashedSaltedSeed)
 
-    const eq = addHex == valHex
-    console.log('eq : ' + eq)
+    const mySha256 = sha256(new TextEncoder().encode(saltedSeed))
+    console.log('mySha256: ' + mySha256)
+
+    const hexEncodedsaltedSeed = Buffer.from(saltedSeed).toString('hex');
+    console.log('hexEncodedsaltedSeed: ' + hexEncodedsaltedSeed)
+
+    console.log('hexEncodedsaltedSeed - sha: ' + sha256(hexEncodedsaltedSeed))
+
+    const ba = new ByteArray(hexEncodedsaltedSeed)
+    console.log('ba: ' + ba)
+
+
+    const wtf = sha256(Array.from(new TextEncoder().encode(seed)).concat(Array.from(new TextEncoder().encode(salt))))
+    console.log('wtf: ' + wtf)
+
+
+
+
+
+
+
+    //     datum.seedHash: 716c11056fea56f90a25516ae77549dd8e9a28947b5ac887f6d44cd6ae528bdb
+    // helios.js?af8c:33286 selectWinner.seed: 18062016
+    // helios.js?af8c:33286 selectWinner.salt: 2808201708082021
+    // helios.js?af8c:33286 contactsSer: 5818313830363230313632383038323031373038303832303231
+    // helios.js?af8c:33286 contactsSerSha: 4400e8ff9b6ce40e202f4424bfa3752b5c6e420090dcc754c2af33a5c06c1bf4
+
+    // const saltedSeedBytes = (new ByteArray(saltedSeed))
+
 
     // await lockRaffleNft(alice, bruce, raffleAddress, assets, network, networkParams, raffleProgram)
 
@@ -377,7 +429,9 @@ const Home: NextPage = (props: any) => {
     const raffleDatum = new (raffleProgram.types.Datum)(
       walletBaseAddress.pubKeyHash,
       new Value(BigInt(5000000)),
-      []
+      [],
+      5,
+      sha256(new TextEncoder().encode(saltedSeed)),
     )
 
     console.log('DATUM 1: ' + raffleDatum)
@@ -538,6 +592,61 @@ const Home: NextPage = (props: any) => {
 
   }
 
+  const selectWinner = async () => {
+
+    const networkParams = new NetworkParams(
+      await fetch(networkParamsUrl)
+        .then(response => response.json())
+    )
+
+    // Compile the helios minting script
+    const raffleProgram = Program.new(lockNftScript);
+    const raffleUplcProgram = raffleProgram.compile(false);
+
+    // Extract the validator script address
+    const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
+    console.log('valAddr: ' + raffleAddress.toBech32())
+
+    const walletHelper = new WalletHelper(walletAPI);
+    const walletBaseAddress = await walletHelper.baseAddress
+
+
+    console.log('a')
+    const contractUtxo = await getKeyUtxo(raffleAddress.toBech32(), nftMph.hex, ByteArrayData.fromString(nftName).toHex())
+    console.log('b')
+    // const nonEmptyDatumUtxo = contractUtxo.filter(utxo => utxo.origOutput.datum != null)
+
+    const walletUtxos = await walletHelper.pickUtxos(new Value(BigInt(1_000_000)))
+    console.log('c')
+    // const valRedeemer = new ConstrData(0, []);
+    const valRedeemer = (new (raffleProgram.types.Redeemer.SelectWinner)(
+      new ByteArray(Array.from(new TextEncoder().encode(seed))),
+      new ByteArray(Array.from(new TextEncoder().encode(salt)))
+    ))._toUplcData()
+
+    console.log('d')
+
+    const tx = new Tx();
+    await tx.addInput(contractUtxo, valRedeemer)
+      .addInputs(walletUtxos[0])
+      .addOutput(new TxOutput(walletBaseAddress, contractUtxo.value))
+      .attachScript(raffleUplcProgram)
+      .addSigner(walletBaseAddress.pubKeyHash)
+      .finalize(networkParams, await walletHelper.changeAddress, walletUtxos[1])
+
+    console.log("tx after final", tx.dump());
+
+    console.log("Verifying signature...");
+    const signatures = await walletAPI.signTx(tx);
+    tx.addSignatures(signatures);
+
+    console.log("Submitting transaction...");
+    const txHash = await walletAPI.submitTx(tx);
+    console.log('txHash: ' + txHash.hex)
+
+
+  }
+
 
   return (
     <div className={styles.container}>
@@ -589,6 +698,9 @@ const Home: NextPage = (props: any) => {
         ) : null}
         {walletIsEnabled ? (
           <input type='button' value='Join Raffle' onClick={() => joinRaffle()} />
+        ) : null}
+        {walletIsEnabled ? (
+          <input type='button' value='Select Winner' onClick={() => selectWinner()} />
         ) : null}
 
 
