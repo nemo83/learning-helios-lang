@@ -251,11 +251,15 @@ const Home: NextPage = (props: any) => {
   }
 
   func raffle_not_full(datum: Datum) -> Bool {
-    (datum.participants.length < datum.numMaxParticipants).trace("RAFFLE_NOT_FULL: ")
+    (datum.participants.length < datum.numMaxParticipants)
+  }
+
+  func rafflefull(datum: Datum) -> Bool {
+    !raffle_not_full(datum)
   }
 
   func is_signed_by_participant(tx: Tx, participants_pkh: PubKeyHash) -> Bool {
-    tx.is_signed_by(participants_pkh).trace("SIGNED_BY_PARTICIPANT: ")
+    tx.is_signed_by(participants_pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")
   }
   
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
@@ -271,7 +275,7 @@ const Home: NextPage = (props: any) => {
           // 1. ticketPrice is paid into the contract (that all that was in the script, + the ticket price , is sent to the datum)
           // 2. uxto where previous datum leaves to be spent
           // 3. new datum is like current + participants contains the pkh of current signer.
-          if (is_signed_by_participant(tx, joinRaffle.pkh) && raffle_not_full(datum)) {
+          if (is_signed_by_participant(tx, joinRaffle.pkh) && raffle_not_full(datum).trace("RAFFLE_NOT_FULL: ")) {
             
             input: TxOutput = context.get_current_input().output;
 
@@ -291,11 +295,38 @@ const Home: NextPage = (props: any) => {
           concats: ByteArray = selectWinner.seed + selectWinner.salt;
           contactsSerSha: ByteArray = concats.sha2();
           // admin or enough participants
-          (datum.is_admin(tx).trace("TRACE_IS_ADMIN: ") || (datum.participants.length == datum.numMaxParticipants).trace("NUM_PARTICIPANTS: ")) &&
+          (datum.is_admin(tx).trace("TRACE_IS_ADMIN: ") || rafflefull(datum).trace("TRACE_RAFFLE_FULL: ")) &&
           // the seed is valid
           (datum.seedHash == contactsSerSha).trace("SEED_MATCH: ")
         }
     }
+  }` as string
+
+  const nftVaultScript = `
+  spending nft_vault_script
+
+  struct Datum {
+      admin: PubKeyHash
+      winner: PubKeyHash
+      func is_admin(self, tx: Tx) -> Bool { tx.is_signed_by(self.admin) }
+      func is_winner(self, tx: Tx) -> Bool { tx.is_signed_by(self.winner) }
+  }
+
+  enum Redeemer {
+    Admin
+    Winner
+  }
+  
+  func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
+      tx: Tx = context.tx;
+      redeemer.switch {
+        Admin => {
+          datum.is_admin(tx).trace("TRACE_IS_ADMIN: ")
+        },
+        Winner => {
+          datum.is_winner(tx).trace("TRACE_IS_WINNER: ")
+        }
+      }
   }` as string
 
   const nftMph = MintingPolicyHash.fromHex(
@@ -346,13 +377,20 @@ const Home: NextPage = (props: any) => {
     // network.tick(BigInt(10));
 
 
-    // Compile the helios minting script
+    // Compile the Raffle Main Script
     const raffleProgram = Program.new(lockNftScript);
     const raffleUplcProgram = raffleProgram.compile(false);
 
-    // Extract the validator script address
+    // Compile the NFT Vault Script
+    const vaultProgram = Program.new(nftVaultScript);
+    const vaultUplcProgram = vaultProgram.compile(false);
+
+    // Extract the raffle script address
     const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
-    console.log('valAddr: ' + raffleAddress.toBech32())
+    console.log('raffleAddress: ' + raffleAddress.toBech32())
+
+    const vaultAddress = Address.fromValidatorHash(vaultUplcProgram.validatorHash);
+    console.log('vaultAddress: ' + vaultAddress.toBech32())
 
     console.log('saltedSeed: ' + saltedSeed)
 
