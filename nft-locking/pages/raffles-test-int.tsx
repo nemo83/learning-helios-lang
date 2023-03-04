@@ -247,6 +247,7 @@ const Home: NextPage = (props: any) => {
     SelectWinner {
       seed: ByteArray
       salt: ByteArray
+      index: Int
     }
   }
 
@@ -260,6 +261,10 @@ const Home: NextPage = (props: any) => {
 
   func is_signed_by_participant(tx: Tx, participants_pkh: PubKeyHash) -> Bool {
     tx.is_signed_by(participants_pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")
+  }
+
+  func select_winning_index(seed: Int, numParticipants: Int) -> Int {
+    ((1103515245 * seed + 12345) % 2147483648) % numParticipants
   }
   
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
@@ -292,12 +297,19 @@ const Home: NextPage = (props: any) => {
           }
         },
         selectWinner: SelectWinner => {
+
           concats: ByteArray = selectWinner.seed + selectWinner.salt;
           contactsSerSha: ByteArray = concats.sha2();
+          decodedSeed: String = selectWinner.seed.decode_utf8();
+          print("decodedSeed:" + decodedSeed);
+          seed: Int = Int::parse(decodedSeed);
+
           // admin or enough participants
           (datum.is_admin(tx).trace("TRACE_IS_ADMIN: ") || rafflefull(datum).trace("TRACE_RAFFLE_FULL: ")) &&
           // the seed is valid
-          (datum.seedHash == contactsSerSha).trace("SEED_MATCH: ")
+          (datum.seedHash == contactsSerSha).trace("SEED_MATCH: ") &&
+          // The winning index is correct (tmp)
+          (select_winning_index(seed, datum.numMaxParticipants) == selectWinner.index).trace("TRACE_INDEX: ")
         }
     }
   }` as string
@@ -341,6 +353,9 @@ const Home: NextPage = (props: any) => {
 
   const hashedSaltedSeed = sha256(saltedSeed)
 
+  const calculateWinningIndex = (seed: string, numParticipants: string) => {
+    return ((BigInt("1103515245") * BigInt(seed) + BigInt(12345)) % BigInt("2147483648")) % BigInt(numParticipants)
+  }
 
   // const networkParamsUrl = 'https://d1t0d7c2nekuk0.cloudfront.net/preprod.json';
 
@@ -411,10 +426,14 @@ const Home: NextPage = (props: any) => {
     const wtf = sha256(Array.from(new TextEncoder().encode(seed)).concat(Array.from(new TextEncoder().encode(salt))))
     console.log('wtf: ' + wtf)
 
+    const a = BigInt("1103515245")
+    console.log('a: ' + a)
 
+    const winningIndex = ((a * BigInt(seed) + BigInt(12345)) % BigInt("2147483648")) % BigInt(15)
+    console.log('winningIndex: ' + winningIndex)
 
-
-
+    // const winningIndex = calculateWinningIndex(BigInt(seed), BigInt(15))
+    // console.log('winningIndex: ' + winningIndex)
 
 
     //     datum.seedHash: 716c11056fea56f90a25516ae77549dd8e9a28947b5ac887f6d44cd6ae528bdb
@@ -475,7 +494,7 @@ const Home: NextPage = (props: any) => {
       walletBaseAddress.pubKeyHash,
       new Value(BigInt(5000000)),
       [],
-      1,
+      15,
       sha256(new TextEncoder().encode(saltedSeed)),
     )
 
@@ -672,10 +691,14 @@ const Home: NextPage = (props: any) => {
 
     const walletUtxos = await walletHelper.pickUtxos(new Value(BigInt(5_000_000)))
     console.log('c')
+
+    const winningIndex = calculateWinningIndex(seed, "15")
+    console.log('winningIndex: ' + winningIndex)
     // const valRedeemer = new ConstrData(0, []);
     const valRedeemer = (new (raffleProgram.types.Redeemer.SelectWinner)(
       new ByteArray(Array.from(new TextEncoder().encode(seed))),
-      new ByteArray(Array.from(new TextEncoder().encode(salt)))
+      new ByteArray(Array.from(new TextEncoder().encode(salt))),
+      winningIndex
     ))._toUplcData()
 
     console.log('d')
