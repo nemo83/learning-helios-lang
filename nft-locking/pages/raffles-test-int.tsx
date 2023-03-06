@@ -235,6 +235,7 @@ const Home: NextPage = (props: any) => {
       participants: []PubKeyHash
       numMaxParticipants: Int
       seedHash: ByteArray
+      vaultPkh: ValidatorHash
 
       func is_admin(self, tx: Tx) -> Bool { tx.is_signed_by(self.admin) }
   }
@@ -249,6 +250,11 @@ const Home: NextPage = (props: any) => {
       salt: ByteArray
       index: Int
     }
+  }
+
+  struct VaultDatum {
+    admin: PubKeyHash
+    winner: PubKeyHash
   }
 
   func raffle_not_full(datum: Datum) -> Bool {
@@ -267,6 +273,32 @@ const Home: NextPage = (props: any) => {
     ((1103515245 * seed + 12345) % 2147483648) % numParticipants
   }
   
+  func values_sent_to_admin_and_vault(
+    tx: Tx, 
+    totalValueLocked: Value,
+    vaultPkh: ValidatorHash, 
+    adminPkh: PubKeyHash, 
+    winnerPkh: PubKeyHash
+    ) -> Bool {
+    
+    print("totalValueLocked.lovelace: " + totalValueLocked.get_lovelace().show());
+
+    assets: Map[MintingPolicyHash]Map[ByteArray]Int = totalValueLocked.to_map().filter((mph: MintingPolicyHash, _) -> { mph != MintingPolicyHash::new(#) });
+
+    vaultValue: Value = Value::from_map(assets) + Value::lovelace(2000000);
+    
+    adminValue: Value = totalValueLocked - vaultValue;
+    
+    valueSentToAdmin: Value = tx.value_sent_to(adminPkh);
+    print("valueSentToAdmin.lovelace: " + valueSentToAdmin.get_lovelace().show());
+
+    valueSentToVault: Value = tx.value_locked_by_datum(vaultPkh, VaultDatum{adminPkh, winnerPkh}, true);
+    print("valueSentToVault.lovelace: " + valueSentToVault.get_lovelace().show());
+
+    (valueSentToAdmin >= adminValue).trace("ADMIN_VALUE: ") &&
+    (vaultValue == valueSentToVault).trace("VAULT_VALUE: ")
+  }
+
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
 
@@ -284,12 +316,20 @@ const Home: NextPage = (props: any) => {
             
             input: TxOutput = context.get_current_input().output;
 
-            new_datum: Datum = Datum { datum.admin, datum.ticketPrice, datum.participants.prepend(joinRaffle.pkh), datum.numMaxParticipants, datum.seedHash };
+            new_datum: Datum = Datum { 
+              datum.admin, 
+              datum.ticketPrice, 
+              datum.participants.prepend(joinRaffle.pkh), 
+              datum.numMaxParticipants, 
+              datum.seedHash,
+              datum.vaultPkh
+            };
 
             actualTargetValue: Value = tx.value_locked_by_datum(context.get_current_validator_hash(), new_datum, true);
 
             expectedTargetValue: Value = input.value + datum.ticketPrice;
 
+            // check NFT is accounted for
             (actualTargetValue >= expectedTargetValue).trace("TRACE_ALL_GOOD? ")
 
           } else {
@@ -298,18 +338,28 @@ const Home: NextPage = (props: any) => {
         },
         selectWinner: SelectWinner => {
 
-          concats: ByteArray = selectWinner.seed + selectWinner.salt;
-          contactsSerSha: ByteArray = concats.sha2();
+          // Build seed/salt hash to verify signature
+          concatSha: ByteArray = (selectWinner.seed + selectWinner.salt).sha2();
+          
           decodedSeed: String = selectWinner.seed.decode_utf8();
-          print("decodedSeed:" + decodedSeed);
           seed: Int = Int::parse(decodedSeed);
+
+          // 2 ada + NFT sent to winner address
+          // Reminder of the ada sent to admin wallet.
 
           // admin or enough participants
           (datum.is_admin(tx).trace("TRACE_IS_ADMIN: ") || rafflefull(datum).trace("TRACE_RAFFLE_FULL: ")) &&
           // the seed is valid
-          (datum.seedHash == contactsSerSha).trace("SEED_MATCH: ") &&
+          (datum.seedHash == concatSha).trace("SEED_MATCH: ") &&
           // The winning index is correct (tmp)
-          (select_winning_index(seed, datum.numMaxParticipants) == selectWinner.index).trace("TRACE_INDEX: ")
+          (select_winning_index(seed, datum.numMaxParticipants) == selectWinner.index).trace("TRACE_INDEX: ") &&
+          // Check correct values sent to admin and vault
+          values_sent_to_admin_and_vault(tx, 
+            context.get_current_input().output.value,
+            datum.vaultPkh, 
+            datum.admin, 
+            datum.participants.get(selectWinner.index)
+            )
         }
     }
   }` as string
@@ -342,7 +392,7 @@ const Home: NextPage = (props: any) => {
   }` as string
 
   const nftMph = MintingPolicyHash.fromHex(
-    'ba3dcfab067cd0739eaa821c9b2d74e6b15c96adcb6eb4dc497a5929'
+    '7dd80d5b5d7d94b56eac097e271a710ca9ebbe28ba9a7d98018b7df4'
   )
 
   const seed = "18062016"
@@ -352,6 +402,8 @@ const Home: NextPage = (props: any) => {
   const saltedSeed = `${seed}${salt}`
 
   const hashedSaltedSeed = sha256(saltedSeed)
+
+  const numParticipants = 1
 
   const calculateWinningIndex = (seed: string, numParticipants: string) => {
     return ((BigInt("1103515245") * BigInt(seed) + BigInt(12345)) % BigInt("2147483648")) % BigInt(numParticipants)
@@ -402,10 +454,16 @@ const Home: NextPage = (props: any) => {
 
     // Extract the raffle script address
     const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
+    console.log('raffleUplcProgram.validatorHash: ' + raffleUplcProgram.validatorHash)
     console.log('raffleAddress: ' + raffleAddress.toBech32())
+    console.log('raffleAddress.toHex(): ' + raffleAddress.toHex())
+    console.log('raffleUplcProgram.validatorHash.hex: ' + raffleUplcProgram.validatorHash.hex)
+    
 
     const vaultAddress = Address.fromValidatorHash(vaultUplcProgram.validatorHash);
     console.log('vaultAddress: ' + vaultAddress.toBech32())
+    console.log('vaultAddress.validatorHash.hex: ' + vaultAddress.validatorHash.hex)
+    console.log('vaultAddress.toHex: ' + vaultAddress.toHex())
 
     console.log('saltedSeed: ' + saltedSeed)
 
@@ -431,6 +489,10 @@ const Home: NextPage = (props: any) => {
 
     const winningIndex = ((a * BigInt(seed) + BigInt(12345)) % BigInt("2147483648")) % BigInt(15)
     console.log('winningIndex: ' + winningIndex)
+
+
+    const myValue = new Value(BigInt(2_000_000), assets)
+    console.log('myValue: ' + myValue.toSchemaJson())
 
     // const winningIndex = calculateWinningIndex(BigInt(seed), BigInt(15))
     // console.log('winningIndex: ' + winningIndex)
@@ -464,13 +526,23 @@ const Home: NextPage = (props: any) => {
         .then(response => response.json())
     )
 
-    // Compile the helios minting script
+    // Compile the Raffle Program
     const raffleProgram = Program.new(lockNftScript);
     const raffleUplcProgram = raffleProgram.compile(false);
 
     // Extract the validator script address
     const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
     console.log('valAddr: ' + raffleAddress.toBech32())
+
+    // Compile the NFT Vault Script
+    const vaultProgram = Program.new(nftVaultScript);
+    const vaultUplcProgram = vaultProgram.compile(false);
+
+    // Extract the validator script address
+    const vaultAddress = Address.fromValidatorHash(vaultUplcProgram.validatorHash);
+    console.log('vaultAddress: ' + vaultAddress.toBech32())
+    console.log('vaultAddress.validatorHash.hex: ' + vaultAddress.validatorHash.hex)
+    console.log('vaultAddress.toHex: ' + vaultAddress.toHex())
 
     const walletHelper = new WalletHelper(walletAPI);
     const walletBaseAddress = await walletHelper.baseAddress
@@ -494,8 +566,9 @@ const Home: NextPage = (props: any) => {
       walletBaseAddress.pubKeyHash,
       new Value(BigInt(5000000)),
       [],
-      15,
+      numParticipants,
       sha256(new TextEncoder().encode(saltedSeed)),
+      vaultUplcProgram.validatorHash
     )
 
     console.log('DATUM 1: ' + raffleDatum)
@@ -590,8 +663,6 @@ const Home: NextPage = (props: any) => {
     console.log('valAddr: ' + raffleAddress.toBech32())
     console.log('valAddr.bytes: ' + raffleAddress.toHex())
 
-
-
     const walletHelper = new WalletHelper(walletAPI);
     const walletBaseAddress = await walletHelper.baseAddress
 
@@ -617,6 +688,8 @@ const Home: NextPage = (props: any) => {
     const seedHash = ByteArray.fromUplcData(foo.list[4])
     console.log('seedHash: ' + seedHash)
 
+    const vaultPkh = ValidatorHash.fromUplcData(foo.list[5])
+    console.log('vaultPkh: ' + vaultPkh.hex)
 
     const newParticipants = participants.slice()
     newParticipants.unshift(walletBaseAddress.pubKeyHash)
@@ -627,7 +700,8 @@ const Home: NextPage = (props: any) => {
       ticketPrice,
       newParticipants,
       numMaxParticipants,
-      seedHash
+      seedHash,
+      vaultPkh
     )
 
     const targetValue = ticketPrice.add(contractUtxo.value)
@@ -642,7 +716,6 @@ const Home: NextPage = (props: any) => {
     const valRedeemer = (new (raffleProgram.types.Redeemer.JoinRaffle)(walletBaseAddress.pubKeyHash))._toUplcData()
 
     const tx = new Tx();
-    tx.body.setFee(BigInt(2_000_000))
     tx.addInput(contractUtxo, valRedeemer)
       .addInputs(walletUtxos[0])
       .addOutput(new TxOutput(raffleAddress, targetValue, Datum.inline(newDatum._toUplcData())))
@@ -672,7 +745,7 @@ const Home: NextPage = (props: any) => {
         .then(response => response.json())
     )
 
-    // Compile the helios minting script
+    // Compile the Raffle Program
     const raffleProgram = Program.new(lockNftScript);
     const raffleUplcProgram = raffleProgram.compile(false);
 
@@ -680,8 +753,20 @@ const Home: NextPage = (props: any) => {
     const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
     console.log('valAddr: ' + raffleAddress.toBech32())
 
+    // Compile the NFT Vault Script
+    const vaultProgram = Program.new(nftVaultScript);
+    const vaultUplcProgram = vaultProgram.compile(false);
+
+    // Extract the validator script address
+    const vaultAddress = Address.fromValidatorHash(vaultUplcProgram.validatorHash);
+    console.log('vaultAddress: ' + vaultAddress.toBech32())
+    console.log('vaultAddress.validatorHash.hex: ' + vaultAddress.validatorHash.hex)
+    console.log('vaultAddress.toHex: ' + vaultAddress.toHex())
+
     const walletHelper = new WalletHelper(walletAPI);
     const walletBaseAddress = await walletHelper.baseAddress
+    console.log('walletBaseAddress: ' + walletBaseAddress.toBech32())
+    console.log('walletBaseAddress.pubKeyHash: ' + walletBaseAddress.pubKeyHash.hex)
 
 
     console.log('a')
@@ -692,7 +777,7 @@ const Home: NextPage = (props: any) => {
     const walletUtxos = await walletHelper.pickUtxos(new Value(BigInt(5_000_000)))
     console.log('c')
 
-    const winningIndex = calculateWinningIndex(seed, "15")
+    const winningIndex = calculateWinningIndex(seed, `${numParticipants}`)
     console.log('winningIndex: ' + winningIndex)
     // const valRedeemer = new ConstrData(0, []);
     const valRedeemer = (new (raffleProgram.types.Redeemer.SelectWinner)(
@@ -703,13 +788,108 @@ const Home: NextPage = (props: any) => {
 
     console.log('d')
 
+    const foo = contractUtxo.origOutput.datum.data as ListData
+    const adminPkh = PubKeyHash.fromUplcData(foo.list[0])
+    console.log('adminPkh: ' + adminPkh.hex)
+
+    const participants = (foo.list[2] as ListData).list.map(item => PubKeyHash.fromUplcData(item))
+    console.log('participants: ' + participants)
+
+    const vaultPkh = PubKeyHash.fromUplcData(foo.list[5])
+    console.log('vaultPkh: ' + vaultPkh.hex)
+
+    const totalValueLocked = contractUtxo.value
+
+    const vaultValue = new Value(BigInt(2_000_000), totalValueLocked.assets)
+    console.log('vaultValue: ' + vaultValue.toSchemaJson())
+
+    const adminValue = totalValueLocked.sub(vaultValue)
+    console.log('adminValue: ' + adminValue.toSchemaJson())
+
+    const vaultDatum = new (vaultProgram.types.Datum)(
+      adminPkh,
+      participants.at(Number(winningIndex))
+    )
+
     const tx = new Tx();
-    await tx.addInput(contractUtxo, valRedeemer)
+    tx.addInput(contractUtxo, valRedeemer)
       .addInputs(walletUtxos[0])
-      .addOutput(new TxOutput(walletBaseAddress, contractUtxo.value))
+      .addOutput(new TxOutput(walletBaseAddress, adminValue))
+      .addOutput(new TxOutput(vaultAddress, vaultValue, Datum.inline(vaultDatum)))
       .attachScript(raffleUplcProgram)
       .addSigner(walletBaseAddress.pubKeyHash)
-      .finalize(networkParams, await walletHelper.changeAddress, walletUtxos[1])
+
+    console.log("tx before final", tx.dump());
+
+    await tx.finalize(networkParams, await walletHelper.changeAddress, walletUtxos[1])
+
+    console.log("tx after final", tx.dump());
+
+    console.log("Verifying signature...");
+    const signatures = await walletAPI.signTx(tx);
+    tx.addSignatures(signatures);
+
+    console.log("Submitting transaction...");
+    const txHash = await walletAPI.submitTx(tx);
+    console.log('txHash: ' + txHash.hex)
+
+
+  }
+
+  const withdrawNft = async () => {
+
+    const networkParams = new NetworkParams(
+      await fetch(networkParamsUrl)
+        .then(response => response.json())
+    )
+
+    // Compile the Raffle Program
+    const raffleProgram = Program.new(lockNftScript);
+    const raffleUplcProgram = raffleProgram.compile(false);
+
+    // Extract the validator script address
+    const raffleAddress = Address.fromValidatorHash(raffleUplcProgram.validatorHash);
+    console.log('valAddr: ' + raffleAddress.toBech32())
+
+    // Compile the NFT Vault Script
+    const vaultProgram = Program.new(nftVaultScript);
+    const vaultUplcProgram = vaultProgram.compile(false);
+
+    // Extract the validator script address
+    const vaultAddress = Address.fromValidatorHash(vaultUplcProgram.validatorHash);
+    console.log('vaultAddress: ' + vaultAddress.toBech32())
+    console.log('vaultAddress.validatorHash.hex: ' + vaultAddress.validatorHash.hex)
+    console.log('vaultAddress.toHex: ' + vaultAddress.toHex())
+
+    const walletHelper = new WalletHelper(walletAPI);
+    const walletBaseAddress = await walletHelper.baseAddress
+    console.log('walletBaseAddress: ' + walletBaseAddress.toBech32())
+    console.log('walletBaseAddress.pubKeyHash: ' + walletBaseAddress.pubKeyHash.hex)
+
+
+    console.log('a')
+    const contractUtxo = await getKeyUtxo(vaultAddress.toBech32(), nftMph.hex, ByteArrayData.fromString(nftName).toHex())
+    console.log('b')
+    // const nonEmptyDatumUtxo = contractUtxo.filter(utxo => utxo.origOutput.datum != null)
+
+    const walletUtxos = await walletHelper.pickUtxos(new Value(BigInt(1_000_000)))
+    console.log('c')
+
+    // Redeemer.Winner
+    const valRedeemer = new ConstrData(1, []);
+
+    console.log('d')
+
+    const tx = new Tx();
+    tx.addInput(contractUtxo, valRedeemer)
+      .addInputs(walletUtxos[0])
+      .addOutput(new TxOutput(walletBaseAddress, contractUtxo.value))
+      .attachScript(vaultUplcProgram)
+      .addSigner(walletBaseAddress.pubKeyHash)
+
+    console.log("tx before final", tx.dump());
+
+    await tx.finalize(networkParams, await walletHelper.changeAddress, walletUtxos[1])
 
     console.log("tx after final", tx.dump());
 
@@ -876,6 +1056,9 @@ const Home: NextPage = (props: any) => {
         ) : null}
         {walletIsEnabled ? (
           <input type='button' value='Select Winner' onClick={() => selectWinner()} />
+        ) : null}
+        {walletIsEnabled ? (
+          <input type='button' value='Collect Won NFT' onClick={() => withdrawNft()} />
         ) : null}
         {walletIsEnabled ? (
           <input type='button' value='Mint NFT' onClick={() => mintNftInWallet()} />
