@@ -269,6 +269,7 @@ const Home: NextPage = (props: any) => {
     tx.is_signed_by(participants_pkh).trace("TRACE_SIGNED_BY_PARTICIPANT: ")
   }
 
+  // https://stackoverflow.com/questions/3062746/special-simple-random-number-generator
   func select_winning_index(seed: Int, numParticipants: Int) -> Int {
     ((1103515245 * seed + 12345) % 2147483648) % numParticipants
   }
@@ -300,6 +301,13 @@ const Home: NextPage = (props: any) => {
     (vaultValue == valueSentToVault).trace("VAULT_VALUE: ")
   }
 
+  // This is the v1 of an NFT raffle contract. 
+  // Some compromises:
+  // 1. Initially there will be an admin that can spend the value in case of need
+  // 2. The "admin" knows who the winner is and so he should not take part.
+  // 
+  // Selection winner uses https://stackoverflow.com/questions/3062746/special-simple-random-number-generator
+  // The seed used to generate the winner is salted and hashed and revealed at winner selection time.
   func main(datum: Datum, redeemer: Redeemer, context: ScriptContext) -> Bool {
       tx: Tx = context.tx;
 
@@ -345,7 +353,7 @@ const Home: NextPage = (props: any) => {
           decodedSeed: String = selectWinner.seed.decode_utf8();
           seed: Int = Int::parse(decodedSeed);
 
-          // 2 ada + NFT sent to winner address
+          // 2 ada + NFT sent to winner address OR vault address (so that winner can manually withdraw)
           // Reminder of the ada sent to admin wallet.
 
           // admin or enough participants
