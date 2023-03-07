@@ -283,9 +283,10 @@ const Home: NextPage = (props: any) => {
     
     print("totalValueLocked.lovelace: " + totalValueLocked.get_lovelace().show());
 
-    assets: Map[MintingPolicyHash]Map[ByteArray]Int = totalValueLocked.to_map().filter((mph: MintingPolicyHash, _) -> { mph != MintingPolicyHash::new(#) });
+    // assets: Map[MintingPolicyHash]Map[ByteArray]Int = totalValueLocked.to_map().filter((mph: MintingPolicyHash, _) -> { mph != MintingPolicyHash::new(#) });
+    assets: Value = totalValueLocked.get_assets();
 
-    vaultValue: Value = Value::from_map(assets) + Value::lovelace(2000000);
+    vaultValue: Value = assets + Value::lovelace(2000000);
     
     adminValue: Value = totalValueLocked - vaultValue;
     
