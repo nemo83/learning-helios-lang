@@ -301,6 +301,21 @@ const Home: NextPage = (props: any) => {
     (vaultValue == valueSentToVault).trace("VAULT_VALUE: ")
   }
 
+  func print_value(value: Value, valueName: String) -> () {
+    print(valueName + ", lovelace: " + value.get_lovelace().show());
+    // Map[MintingPolicyHash]Map[ByteArray]Int
+    value
+      .get_assets()
+      .to_map()
+      .for_each( (mph: MintingPolicyHash, tokens: Map[ByteArray]Int) -> {
+        print(valueName + ", mph: " + mph.show());
+        tokens
+          .for_each((tokenName: ByteArray, amount: Int) -> {
+            print(valueName + ", tokenName: " + tokenName.decode_utf8() + ", amount: " + amount.show())
+          })
+      })
+  }
+
   // This is the v1 of an NFT raffle contract. 
   // Some compromises:
   // 1. Initially there will be an admin that can spend the value in case of need
@@ -324,6 +339,8 @@ const Home: NextPage = (props: any) => {
           if (is_signed_by_participant(tx, joinRaffle.pkh) && raffle_not_full(datum).trace("RAFFLE_NOT_FULL: ")) {
             
             input: TxOutput = context.get_current_input().output;
+
+            print_value(input.value, "input.value");
 
             new_datum: Datum = Datum { 
               datum.admin, 
